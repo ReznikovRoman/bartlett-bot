@@ -6,7 +6,7 @@ import os
 
 
 token = os.environ.get("BARTLETT_BOT_TOKEN")
-# server_id = os.environ.get("BARTLETT_SERVER_ID")
+server_id = os.environ.get("BARTLETT_SERVER_ID")
 client = discord.Client()
 
 bot = commands.Bot(command_prefix='.')
@@ -18,5 +18,3 @@ async def on_ready():
 
 
 bot.run(token)
-
-# https://discordapp.com/oauth2/authorize?client_id=688749198597947426&scope=bot&permissions=8
