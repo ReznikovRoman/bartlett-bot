@@ -18,5 +18,3 @@ async def on_ready():
 
 
 bot.run(token)
-
-# https://discordapp.com/oauth2/authorize?client_id=688749198597947426&scope=bot&permissions=8
