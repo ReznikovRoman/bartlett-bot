@@ -7,12 +7,8 @@ import json
 import re
 
 
-def rank_formula(curr_rank, prev_rank):
-    new_rank = (curr_rank + prev_rank*((prev_rank/curr_rank) + 0.1)) // 2
-    return int(curr_rank) if curr_rank == prev_rank and new_rank != curr_rank else int(new_rank)
-
-
-class R6Player(object):
+class R6Player:
+    """ R6Tab User """
     def __init__(self, player_url, platform=None):
         """
         :param player_nickname: string  --> Rainbow Six user's nickname
@@ -23,7 +19,7 @@ class R6Player(object):
             self.platform = "uplay"
 
     @property
-    def player_id(self):
+    def tab_id(self):
         pattern = re.compile('.*com/(.*)')
         r6_id = pattern.findall(self.url)
         if r6_id:
@@ -31,9 +27,9 @@ class R6Player(object):
         else:
             return None
 
-    def check_existence(self):
-        if self.player_id:
-            search_url = f"https://r6tab.com/api/player.php?p_id={self.player_id}"
+    def is_exists(self):
+        if self.tab_id:
+            search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
             r = requests.get(search_url)
             response = json.loads(r.text)
             return response['playerfound']
@@ -45,25 +41,26 @@ class R6Player(object):
     #     return response['results']
 
     def search_by_id(self):
-        if self.player_id:
-            search_url = f"https://r6tab.com/api/player.php?p_id={self.player_id}"
+        if self.tab_id:
+            search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
             r = requests.get(search_url)
             response = json.loads(r.text)
-            response['season17mmr'] = 2844
             return response
 
-    def get_current_mmr(self):
-        if self.player_id:
+    @property
+    def curr_mmr(self):
+        if self.tab_id:
             response = self.search_by_id()
             return response['ranked']['mmr']
 
-    def get_prev_mmr(self):
-        if self.player_id:
+    @property
+    def prev_mmr(self):
+        if self.tab_id:
             prev_season = ""
             response = self.search_by_id()
             for key, value in response.items():
                 if str(key).startswith("season") and str(key).endswith("mmr"):
-                    if value == self.get_current_mmr():
+                    if value == self.curr_mmr():
                         curr_season = key
                         prev_season = "season"+str(int(curr_season[6:8])-1)+"mmr"
                         break
@@ -75,35 +72,39 @@ class R6Player(object):
             return response[prev_season]
 
     def __str__(self):
-        if self.player_id:
-            return f"R6Tab URL: {self.url}, ID: {self.player_id};" \
-                   f"\nBartlett MMR: {rank_formula(self.get_prev_mmr(), self.get_current_mmr())}\n"
+        if self.tab_id:
+            return f"R6Tab URL: {self.url}, ID: {self.tab_id};" \
+                   f"\nPrevious and Current MMR: {(self.prev_mmr(), self.curr_mmr())}\n"
 
 
-class BartlettPlayer(object):
-    """Class for discord server members, who participate in Bartlett Tournaments"""
-    def __init__(self, member_id, user_nickname, tab_url, tab_id=None):
+class BartlettPlayer(R6Player):
+    """ Class for discord server members, who participate in Bartlett Tournaments. """
+    def __init__(self, member_id, user_nickname, tab_url, platform=None):
         """
         :param member_id: integer  --> discord Member id
         :param user_nickname: string  --> discord Member nickname
-        :param tab_nickname: string  --> R6Tab user nickname
-        :param tab_id: integer  --> Unique R6Tab player id
+        :param tab_url: string  --> discord Member R6Tab Link
+        :param platform: string  --> uplay | psn | xbl  ('uplay' by default)
         """
+        super(BartlettPlayer, self).__init__(tab_url, platform)
         self.member_id = member_id
         self.user_nickname = user_nickname
-        self.tab_url = tab_url
-        # ===== Rainbow6 related fields ===============
-        r6player = R6Player(tab_url)
-        self.tab_id = r6player.player_id
-        self.curr_mmr = r6player.get_current_mmr()
-        self.prev_mmr = r6player.get_prev_mmr()
-        self.bartlett_mmr = rank_formula(self.prev_mmr, self.curr_mmr)
+        # ================ Rainbow6 related fields ===============
+        #   self.tab_id
+        #   self.curr_mmr
+        #   self.prev_mmr
+        self.bartlett_mmr = self.__rank_formula(self.prev_mmr, self.curr_mmr)
         # ==============================================================
-        self.curr_team = None  # Team, where user is going to play current tournament
+        self.curr_team = None  # user's Team for the current tournament
+
+    @staticmethod
+    def __rank_formula(curr_rank, prev_rank):
+        new_rank = (curr_rank + prev_rank * ((prev_rank / curr_rank) + 0.1)) // 2
+        return int(curr_rank) if curr_rank == prev_rank and new_rank != curr_rank else int(new_rank)
 
     def __str__(self):
         return f"Member Nickname: {self.user_nickname}, Member Discord.id: {self.member_id};" \
-               f"\nR6Tab URL: {self.tab_url}, R6Tab id: {self.tab_id}, Server MMR: {self.bartlett_mmr}\n"
+               f"\nR6Tab URL: {self.url}, R6Tab id: {self.tab_id}, Server MMR: {self.bartlett_mmr}\n"
 
 
 def bot_text_channels(ctx):
@@ -133,21 +134,21 @@ class RankedSystem(commands.Cog):
 
     @commands.command(name="sign-in")
     @commands.check(bot_registration_channels)
-    async def sign_in(self, ctx: commands.Context, r6_url):
-        r6player = R6Player(r6_url)
-        print("test-main", r6player.check_existence())
-        if r6player.player_id and r6player.check_existence():
+    async def sign_in(self, ctx: commands.Context, r6_url, platform=None):
+        player = BartlettPlayer(ctx.author.id, ctx.author.nick, r6_url, platform)
+        print(ctx.author.id, ctx.author.nick, r6_url, platform)
+        if player.tab_id and player.is_exists():
             await ctx.send("Well done! You've successfully registered.")
-        elif not r6player.player_id:
+        elif not player.tab_id:
             await ctx.send("Please, check your nickname, I cannot find your profile\n"
                            "Enter your nickname once again (with __.sign-in__ command)")
-        elif not r6player.check_existence():
+        elif not player.is_exists():
             await ctx.send("Please, check your nickname, I cannot find your profile\n"
                            "Enter your nickname once again (with __.sign-in__ command)")
         else:
             await ctx.send("Ooops... Something went wrong\nPlease, try enter your nickname again or come back later")
 
-        
+    # ================================================================================================================
 
     # =============== Cog's example =============
     # @commands.Cog.listener()
@@ -158,7 +159,7 @@ class RankedSystem(commands.Cog):
     #     author_id = str(message.author.id)
     #     print(f"""Member {author_id} has said: {message.content}""")
 
-    # ===========================================
+    # =================================================================================================================
 
 
 def setup(bot):
