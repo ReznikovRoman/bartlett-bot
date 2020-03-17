@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 import requests
 import json
 import re
+import asyncpg, asyncio
 
 
 class R6Player:
@@ -120,6 +121,41 @@ class BartlettPlayer(R6Player):
                f"\nR6Tab URL: {self.url}, R6Tab id: {self.tab_id}, Server MMR: {self.bartlett_mmr}\n"
 
 
+class PostgresDb:
+    def __init__(self, conn: asyncpg.Connection):
+        self.conn = conn
+
+    async def is_exist(self, table, bartlett_player: BartlettPlayer):
+        """
+        Checks, whether there is a <Player> in the <table> or not
+
+        :param table: string  --> name of the table in the Postgres DB
+        :param bartlett_player:  'BartlettPlayer'  --> object
+        :return bool  --> True | False
+        """
+        p_query = f"SELECT * FROM {table} WHERE member_id = $1"
+        result = await self.conn.fetchrow(p_query, bartlett_player.member_id)
+        return True if result else False
+
+    async def insert_user(self, table, bartlett_player: BartlettPlayer):
+        """
+        Insert <Player> to the table (if he hadn't registered before)
+        :param table: table_name: string  --> name of the table in the Postgres DB
+        :param bartlett_player: 'BartlettPlayer'  --> player, that has to be inserted to the <table>
+        :return: "insert player to the <table>" or "you've already registered"
+        """
+        print("Trying to insert...")
+
+        print("Inserting")
+        p_query = f"INSERT INTO {table} (user_nickname, prev_mmr, curr_mmr, member_id, tab_id, bartlett_mmr) VALUES ($1, $2, $3, $4, $5, $6)"
+        await self.conn.execute(p_query,
+                                bartlett_player.user_nickname, bartlett_player.prev_mmr,
+                                bartlett_player.curr_mmr, bartlett_player.member_id,
+                                bartlett_player.tab_id, bartlett_player.bartlett_mmr)
+        print("Done!")
+        await self.conn.close()
+
+
 def bot_text_channels(ctx):
     valid_channels = [688770023652589603,  # Test-Bot/bot-commands-open
                       688770173376659474,  # Test-Bot/bot-commands-close
@@ -129,7 +165,7 @@ def bot_text_channels(ctx):
 
 
 def bot_registration_channels(ctx):
-    valid_registration_channels = [689166657020493885]  # Test-Bot/test-registration
+    valid_registration_channels = [689166657020493885, 689576686274084967]  # Test-Bot/test-registration
     ctx: commands.Context
     return ctx.channel.id in valid_registration_channels
 
@@ -150,9 +186,22 @@ class RankedSystem(commands.Cog):
     async def sign_in(self, ctx: commands.Context, r6_url, platform=None):
         await ctx.send("Wait for a few seconds. I have to check your profile...")
         player = BartlettPlayer(ctx.author.id, ctx.author.name, r6_url, platform)
+
         print("test-main", player.is_exist())
         if player.tab_id and player.is_exist():
-            await ctx.send("Well done! You've successfully registered.")
+
+            print("DataBase Test:\n")
+
+            conn = self.bot.pg_con
+            registration_table = "user_info"
+            db = PostgresDb(conn)
+
+            if not await db.is_exist(registration_table, player):
+                await db.insert_user(registration_table, player)
+                await ctx.send("Well done! You've successfully registered.")
+            else:
+                await ctx.send("Oops...It seems that you're already registered.")
+
         elif not player.tab_id:
             await ctx.send("Please, check your nickname, I cannot find your profile\n"
                            "Enter your nickname once again (with __.sign-in__ command)")
