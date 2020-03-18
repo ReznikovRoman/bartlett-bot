@@ -5,7 +5,8 @@ from discord.ext import commands, tasks
 import requests
 import json
 import re
-import asyncpg, asyncio
+import asyncpg
+import asyncio
 
 
 class R6Player:
@@ -46,7 +47,6 @@ class R6Player:
             search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
             r = requests.get(search_url)
             response = json.loads(r.text)
-            response['season17mmr'] = 2844
             return response
 
     @property
@@ -133,8 +133,8 @@ class PostgresDb:
         :param bartlett_player:  'BartlettPlayer'  --> object
         :return bool  --> True | False
         """
-        p_query = f"SELECT * FROM {table} WHERE member_id = $1"
-        result = await self.conn.fetchrow(p_query, bartlett_player.member_id)
+        p_query = f"SELECT * FROM {table} WHERE tab_id = $1 OR member_id = $2"
+        result = await self.conn.fetchrow(p_query, bartlett_player.tab_id, bartlett_player.member_id)
         return True if result else False
 
     async def insert_user(self, table, bartlett_player: BartlettPlayer):
@@ -155,6 +155,26 @@ class PostgresDb:
         print("Done!")
         await self.conn.close()
 
+    async def get_user(self, table, bartlett_id: str):
+        """
+
+        :param table: table_name: string  --> name of the table in the Postgres DB
+        :param bartlett_id: str  --> unique discord id
+        :return: BartlettPlayer
+        """
+
+        print("DB - getting user info, id: ", bartlett_id)
+        p_query = f"SELECT * FROM {table} WHERE member_id = $1"
+        result = await self.conn.fetchrow(p_query, int(bartlett_id))
+        print("Done")
+        return result
+
+    async def get_everyone(self, table):
+        print("Getting everything from", table)
+        p_query = f"SELECT * FROM {table}"
+        result = await self.conn.fetch(p_query)
+        return result
+
 
 def bot_text_channels(ctx):
     valid_channels = [688770023652589603,  # Test-Bot/bot-commands-open
@@ -165,7 +185,7 @@ def bot_text_channels(ctx):
 
 
 def bot_registration_channels(ctx):
-    valid_registration_channels = [689166657020493885, 689576686274084967]  # Test-Bot/test-registration
+    valid_registration_channels = [689166657020493885, 689939689892741298]  # Test-Bot/test-registration
     ctx: commands.Context
     return ctx.channel.id in valid_registration_channels
 
@@ -189,15 +209,15 @@ class RankedSystem(commands.Cog):
 
         print("test-main", player.is_exist())
         if player.tab_id and player.is_exist():
-
-            print("DataBase Test:\n")
+            print("Nickname: ", player.user_nickname)
+            print("DataBase Test\n")
 
             conn = self.bot.pg_con
             registration_table = "user_info"
             db = PostgresDb(conn)
 
             if not await db.is_exist(registration_table, player):
-                await db.insert_user(registration_table, player)
+                # await db.insert_user(registration_table, player)
                 await ctx.send("Well done! You've successfully registered.")
             else:
                 await ctx.send("Oops...It seems that you're already registered.")
@@ -210,6 +230,37 @@ class RankedSystem(commands.Cog):
                            "Enter your nickname once again (with __.sign-in__ command)")
         else:
             await ctx.send("Ooops... Something went wrong\nPlease, try enter your nickname again or come back later")
+
+    @commands.command(name='get-player-dis')  # get-player-dis
+    @commands.check(bot_text_channels)
+    async def get_player(self, ctx, member_id):
+        print("test-get_player", ctx.author.id)
+
+        conn = self.bot.pg_con
+        registration_table = "user_info"
+        db = PostgresDb(conn)
+
+        player_info = await db.get_user(registration_table, member_id)
+        if player_info:
+            await ctx.send(str(player_info))
+        else:
+            await ctx.send("There is no registered user with such discord id.")
+
+    @commands.command(name='s')  # get-all
+    @commands.check(bot_text_channels)
+    async def get_all_from_db(self, ctx):
+        print("test-get_all", ctx.author.id)
+
+        conn = self.bot.pg_con
+        registration_table = "user_info"
+        db = PostgresDb(conn)
+
+        await ctx.send("Looking for every registered user...")
+        users = await db.get_everyone(registration_table)
+        for user in users:
+            user: asyncpg.Record
+            await ctx.send(str(user))
+        print("Done!")
 
     # =============== Cog's example =============
     # @commands.Cog.listener()

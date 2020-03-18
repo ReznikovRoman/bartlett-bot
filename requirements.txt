@@ -1,4 +1,6 @@
 git+https://github.com/Rapptz/discord.py
 async-timeout
 requests
+aiohttp
+unsync
 asyncpg
