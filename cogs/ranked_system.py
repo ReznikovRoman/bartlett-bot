@@ -5,7 +5,10 @@ from discord.ext import commands, tasks
 import requests
 import json
 import re
+
+import aiohttp
 import asyncpg
+from async_property import async_property
 import asyncio
 
 
@@ -29,11 +32,24 @@ class R6Player:
         else:
             return None
 
-    def is_exist(self):
+    async def search_by_id(self):
+        search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(search_url) as r:
+                response_text = await r.text()
+                response = json.loads(response_text)
+        return response
+
+    async def is_exist(self):
         if self.tab_id:
-            search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
-            r = requests.get(search_url)
-            response = json.loads(r.text)
+            # search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
+            # async with aiohttp.ClientSession() as session:
+            #     async with session.get(search_url) as r:
+            #         response_text = await r.text  # response_text = await r.text()
+            #         response = json.loads(response_text)
+            #
+            #         return response['playerfound']
+            response = await self.search_by_id()
             return response['playerfound']
 
     # def search_by_nickname(self):
@@ -42,22 +58,13 @@ class R6Player:
     #     response = json.loads(r.text)
     #     return response['results']
 
-    def search_by_id(self):
-        if self.is_exist():
-            search_url = f"https://r6tab.com/api/player.php?p_id={self.tab_id}"
-            r = requests.get(search_url)
-            response = json.loads(r.text)
-            return response
+    @async_property
+    async def curr_mmr(self):
+        response = await self.search_by_id()
+        return response['ranked']['mmr']
 
-    @property
-    def curr_mmr(self):
-        if self.is_exist():
-            response = self.search_by_id()
-            return response['ranked']['mmr']
-
-    @property
-    def prev_mmr(self):
-        if self.is_exist():
+    @async_property
+    async def prev_mmr(self):
             # prev_season = ""
             # response = self.search_by_id()
             # for key, value in response.items():
@@ -71,21 +78,20 @@ class R6Player:
             #                 continue
             #             else:
             #                 prev_season = key
-            response = self.search_by_id()
-            prev_season = "season16mmr"
-            return response[prev_season]
+        response = await self.search_by_id()
+        prev_season = "season16mmr"
+        return response[prev_season]
 
     def __str__(self):
-        if self.is_exist():
-            return f"R6Tab URL: {self.url}, ID: {self.tab_id};" \
-                   f"\nCurrent MMR: {self.prev_mmr}, Previous MMR: {self.curr_mmr}\n"
+        return f"R6Tab URL: {self.url}, ID: {self.tab_id};" \
+               f"\nCurrent MMR: {self.prev_mmr}, Previous MMR: {self.curr_mmr}\n"
 
 
 class BartlettPlayer(R6Player):
     """ Class for discord server members, who participate in Bartlett Tournaments """
 
     @staticmethod
-    def __rank_formula(curr_rank, prev_rank):
+    async def __rank_formula(curr_rank, prev_rank):
         if curr_rank and prev_rank:
             if curr_rank < prev_rank:
                 new_rank = (curr_rank + prev_rank * ((curr_rank / prev_rank) + 0.1)) // 2
@@ -112,9 +118,16 @@ class BartlettPlayer(R6Player):
         # self.tab_id
         # self.curr_mmr
         # self.prev_mmr
-        self.bartlett_mmr = self.__rank_formula(self.prev_mmr, self.curr_mmr)
+
+        # self.bartlett_mmr = self.__rank_formula(self.prev_mmr, self.curr_mmr)
+
         # ==============================================================
-        self.curr_team = None  # Team, where user is going to play current tournament
+
+        # self.curr_team = None  # Team, where user is going to play current tournament
+
+    @async_property
+    async def bartlett_mmr(self):
+        return await self.__rank_formula(await self.prev_mmr, await self.curr_mmr)
 
     def __str__(self):
         return f"\nMember Nickname: {self.user_nickname}, Member Discord.id: {self.member_id};" \
@@ -148,10 +161,15 @@ class PostgresDb:
 
         print("Inserting")
         p_query = f"INSERT INTO {table} (user_nickname, prev_mmr, curr_mmr, member_id, tab_id, bartlett_mmr) VALUES ($1, $2, $3, $4, $5, $6)"
+
+        print("DataBase: Bartlett MMR ==> ", await bartlett_player.bartlett_mmr)
+        print("DataBase: Current MMR ==> ", await bartlett_player.curr_mmr)
+        print("DataBase: Previous MMR ==> ", await bartlett_player.prev_mmr)
+
         await self.conn.execute(p_query,
-                                bartlett_player.user_nickname, bartlett_player.prev_mmr,
-                                bartlett_player.curr_mmr, bartlett_player.member_id,
-                                bartlett_player.tab_id, bartlett_player.bartlett_mmr)
+                                bartlett_player.user_nickname, await bartlett_player.prev_mmr,
+                                await bartlett_player.curr_mmr, bartlett_player.member_id,
+                                bartlett_player.tab_id, await bartlett_player.bartlett_mmr)
         print("Done!")
         await self.conn.close()
 
@@ -207,8 +225,10 @@ class RankedSystem(commands.Cog):
         await ctx.send("Wait for a few seconds. I have to check your profile...")
         player = BartlettPlayer(ctx.author.id, ctx.author.name, r6_url, platform)
 
-        print("test-main", player.is_exist())
-        if player.tab_id and player.is_exist():
+        is_exist = await player.is_exist()
+
+        print("test-main", is_exist)
+        if player.tab_id and is_exist:
             print("Nickname: ", player.user_nickname)
             print("DataBase Test\n")
 
@@ -217,7 +237,8 @@ class RankedSystem(commands.Cog):
             db = PostgresDb(conn)
 
             if not await db.is_exist(registration_table, player):
-                # await db.insert_user(registration_table, player)
+                print("MMRs: ", await player.bartlett_mmr)
+                await db.insert_user(registration_table, player)
                 await ctx.send("Well done! You've successfully registered.")
             else:
                 await ctx.send("Oops...It seems that you're already registered.")

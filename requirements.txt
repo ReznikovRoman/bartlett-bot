@@ -4,3 +4,4 @@ requests
 aiohttp
 unsync
 asyncpg
+async-property
