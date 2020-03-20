@@ -24,7 +24,7 @@ async def create_db_pool():
     bot.pg_con = await asyncpg.create_pool(database="test_bartlett_db", user="postgres", password=PG_PSW)
 
 
-for cog in os.listdir(".\\cogs"):
+for cog in os.listdir("cogs/"):
     if cog.endswith(".py") and not cog.startswith("_"):
         try:
             cog = f"""cogs.{cog.replace('.py', '')}"""
