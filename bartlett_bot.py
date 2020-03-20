@@ -17,7 +17,7 @@ bot = commands.Bot(command_prefix='.')
 
 @bot.event
 async def on_ready():
-    print("Bartlett bot is set and ready to work...")
+    print("Bartlett bot is set and ready to work...\n")
 
 
 async def create_db_pool():
